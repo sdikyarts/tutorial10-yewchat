@@ -45,6 +45,7 @@ pub struct Chat {
     wss: WebsocketService,
     messages: Vec<MessageData>,
     _producer: Box<dyn Bridge<EventBus>>,
+    current_username: String,
 }
 
 
@@ -80,6 +81,7 @@ impl Component for Chat {
             chat_input: NodeRef::default(),
             wss,
             _producer: EventBus::bridge(ctx.link().callback(Msg::HandleMsg)),
+            current_username: username,
         }
     }
 
@@ -140,60 +142,92 @@ impl Component for Chat {
     
     fn view(&self, ctx: &Context<Self>) -> Html {
         let submit = ctx.link().callback(|_| Msg::SubmitMessage);
+        let current_username = self.current_username.clone();
+        let onkeydown = {
+            let submit = submit.clone();
+            Callback::from(move |e: KeyboardEvent| {
+                if e.key() == "Enter" && !e.shift_key() {
+                    e.prevent_default();
+                    submit.emit(());
+                }
+            })
+        };
         html! {
             <div class="flex w-screen">
-                <div class="flex-none w-56 h-screen bg-gray-100">
-                    <div class="text-xl p-3">{"Users"}</div>
-                    {
-                        self.users.clone().iter().map(|u| {
-                            html!{
-                                <div class="flex m-3 bg-white rounded-lg p-2">
-                                    <div>
-                                        <img class="w-12 h-12 rounded-full" src={u.avatar.clone()} alt="avatar"/>
-                                    </div>
-                                    <div class="flex-grow p-3">
-                                        <div class="flex text-xs justify-between">
-                                            <div>{u.name.clone()}</div>
-                                        </div>
-                                        <div class="text-xs text-gray-400">
-                                            {"Hi there!"}
-                                        </div>
-                                    </div>
-                                </div>
-                            }
-                        }).collect::<Html>()
-                    }
-                </div>
-                <div class="grow h-screen flex flex-col">
-                    <div class="w-full h-14 border-b-2 border-gray-300"><div class="text-xl p-3">{"💬 Chat!"}</div></div>
-                    <div class="w-full grow overflow-auto border-b-2 border-gray-300">
+                <div class="flex-none w-56 h-screen bg-gray-100 flex flex-col justify-between">
+                    <div>
+                        <div class="text-xl p-3">{"Users"}</div>
                         {
-                            self.messages.iter().map(|m| {
-                                let user = self.users.iter().find(|u| u.name == m.from).unwrap();
+                            self.users.iter().filter(|u| u.name != current_username).map(|u| {
                                 html!{
-                                    <div class="flex items-end w-3/6 bg-gray-100 m-8 rounded-tl-lg rounded-tr-lg rounded-br-lg ">
-                                        <img class="w-8 h-8 rounded-full m-3" src={user.avatar.clone()} alt="avatar"/>
-                                        <div class="p-3">
-                                            <div class="text-sm">
-                                                {m.from.clone()}
+                                    <div class="flex m-3 bg-white rounded-lg p-2">
+                                        <div>
+                                            <img class="w-12 h-12 rounded-full" src={u.avatar.clone()} alt="avatar"/>
+                                        </div>
+                                        <div class="flex-grow p-3">
+                                            <div class="flex text-xs justify-between">
+                                                <div>{u.name.clone()}</div>
                                             </div>
-                                            <div class="text-xs text-gray-500">
-                                                if m.message.ends_with(".gif") {
-                                                    <img class="mt-3" src={m.message.clone()}/>
-                                                } else {
-                                                    {m.message.clone()}
-                                                }
+                                            <div class="text-xs text-gray-400">
+                                                {"Hi there!"}
                                             </div>
                                         </div>
                                     </div>
                                 }
                             }).collect::<Html>()
                         }
-
+                    </div>
+                    <div class="bg-white m-3 rounded-lg p-2 flex items-center border-t">
+                        <img class="w-12 h-12 rounded-full" src={format!("https://avatars.dicebear.com/api/adventurer-neutral/{}.svg", current_username)} alt="avatar"/>
+                        <div class="flex-grow p-3">
+                            <div class="flex text-xs justify-between">
+                                <div>{current_username.clone()}</div>
+                            </div>
+                            <div class="text-xs text-gray-400">
+                                {"You"}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="grow h-screen flex flex-col">
+                    <div class="w-full h-14 border-b-2 border-gray-300"><div class="text-xl p-3">{"💬 Chat!"}</div></div>
+                    <div class="w-full grow overflow-auto border-b-2 border-gray-300">
+                        {
+                            self.messages.iter().map(|m| {
+                                let is_current = m.from == current_username;
+                                let user = self.users.iter().find(|u| u.name == m.from);
+                                let avatar = user.map(|u| u.avatar.clone()).unwrap_or_else(|| format!("https://avatars.dicebear.com/api/adventurer-neutral/{}.svg", m.from));
+                                let bubble_class = if is_current {
+                                    "flex items-end w-3/6 bg-blue-100 m-8 rounded-tl-lg rounded-tr-lg rounded-bl-lg ml-auto justify-end"
+                                } else {
+                                    "flex items-end w-3/6 bg-gray-100 m-8 rounded-tl-lg rounded-tr-lg rounded-br-lg"
+                                };
+                                html!{
+                                    <div class={bubble_class}>
+                                        {if !is_current {
+                                            html!{<img class="w-8 h-8 rounded-full m-3" src={avatar.clone()} alt="avatar"/>}
+                                        } else { html!{} }}
+                                        <div class="p-3">
+                                            <div class="text-sm">{m.from.clone()}</div>
+                                            <div class="text-xs text-gray-500">
+                                                {if m.message.ends_with(".gif") {
+                                                    html!{<img class="mt-3" src={m.message.clone()}/>}
+                                                } else {
+                                                    html!{m.message.clone()}
+                                                }}
+                                            </div>
+                                        </div>
+                                        {if is_current {
+                                            html!{<img class="w-8 h-8 rounded-full m-3" src={avatar.clone()} alt="avatar"/>}
+                                        } else { html!{} }}
+                                    </div>
+                                }
+                            }).collect::<Html>()
+                        }
                     </div>
                     <div class="w-full h-14 flex px-3 items-center">
-                        <input ref={self.chat_input.clone()} type="text" placeholder="Message" class="block w-full py-2 pl-4 mx-3 bg-gray-100 rounded-full outline-none focus:text-gray-700" name="message" required=true />
-                        <button onclick={submit} class="p-3 shadow-sm bg-blue-600 w-10 h-10 rounded-full flex justify-center items-center color-white">
+                        <textarea ref={self.chat_input.clone()} placeholder="Message" class="block w-full py-2 pl-4 mx-3 bg-gray-100 rounded-full outline-none focus:text-gray-700 resize-none" name="message" required=true rows=1 onkeydown={onkeydown}/>
+                        <button onclick={Callback::from(move |_| submit.emit(()))} class="p-3 shadow-sm bg-blue-600 w-10 h-10 rounded-full flex justify-center items-center color-white">
                             <svg fill="#000000" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" class="fill-white">
                                 <path d="M0 0h24v24H0z" fill="none"></path><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
                             </svg>
